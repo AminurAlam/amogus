@@ -1,115 +1,131 @@
-import requests, os, argparse, re
-from urllib.parse import unquote, urlparse
-from pathlib import PurePosixPath
+import requests
+import os
+import argparse
 
-logo = r"""
+# Configure this if the search results are not enough for you
+SEARCH_LIMIT = 25
+
+# API URL
+API_URL = 'https://itunes.apple.com/'
+
+# Logo
+LOGO = r"""
   __ _ _ __ ___   ___   __ _ _   _ ___
  / _` | '_ ` _ \ / _ \ / _` | | | / __|
 ( (_| | | | | | | (_) | (_| | |_| \__ \
  \__,_|_| |_| |_|\___/ \__, |\__,_|___/
-repository:             __/ |Ver: 0.3.3
+repository:             __/ |Ver: 1.0.0
 github.com/R3AP3/amogus|___/           
 """
 
-parser = argparse.ArgumentParser(description="Downloads Album Covers as their Source File from the Itunes Store")
-parser.add_argument("-s", "--search", dest='album_search', help="search for an album", action="store_true")
-parser.add_argument("-a", "--artist", dest='artist_search', help="search for an artist", action="store_true")
-parser.add_argument("-r", "--region", type=str, dest='region_code', help="specify a custom region (default is 'us', see all available region codes: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2)", default="us", metavar="REGION_CODE")
-parser.add_argument("input", type=str, help="Apple Music URL or Album/Artist name", metavar="INPUT")
 
-def get_collectionids(album_id, region_code):
-    response = requests.get(f'https://itunes.apple.com/lookup?id={album_id}&country={region_code}&entity=album&limit=200&sort=recent')
-    data = response.json()["results"]
-    idlist = []
-    for i in range(len(data)):
-        if i == 0:
-            print("Downloading Artist: " + data[i]["artistName"])
-        else:
-            dict_raw = data[i]
-            collection_id = dict_raw["collectionId"]
-            idlist.append(collection_id)
-    return idlist
-
-def parse_request(album_id, region_code):
-    response = requests.get(f'https://itunes.apple.com/lookup?id={album_id}&country={region_code}&entity=album')
-    details = response.json()["results"][0]
-    filename = str(details["artistId"]) + " - " + str(details["collectionId"])
-    download_status = str(details["artistName"]) + " - " + str(details["collectionName"])
-    cover_url = details["artworkUrl100"]
-    return cover_url, download_status, filename
-
-def download_picture_with_correct_extension(url, filename, download_status):
+def download_artwork(url, filename):
     r = requests.get(url)
-    ext = r.headers["content-type"].split("/")[1]
-    if ext == "jpeg":
-        ext = "jpg"
-    with open(f"cover/{filename}.{ext}", "wb") as f:
-        f.write(r.content)
+    if r.status_code == 200:
+        ext = r.headers['Content-Type'].split('/')[1]
+        if ext == 'jpeg':
+            ext = 'jpg'
+        with open(f'cover/{filename}.{ext}', 'wb') as f:
+            f.write(r.content)
+    else:
+        print('Error downloading artwork [' + str(r.status_code) + ']')
 
-def get_source(art):
-    string = ["is\d-ssl", "image/thumb", "/100x100bb.jpg"]
-    sub = ["a1", "r40", ""]
-    re_loop = 0
-    url_fixxed = art
 
-    while re_loop < 3:
-        url_fixxed = re.sub(string[re_loop], sub[re_loop], url_fixxed)
-        re_loop = re_loop + 1
-    return url_fixxed
+def request(request_action, params):
+    r = requests.get(API_URL + request_action, params=params)
+    return r.json()
 
-def make_dir():
+
+def search(search_input, search_type):
+    # Search takes a query and returns the results
+    # Only used for the initial search
+    # Every subsequent search is done with the lookup function using the ID's from the initial search
+    params = {
+        'term': search_input,
+        'entity': search_type,
+        'limit': SEARCH_LIMIT
+    }
+    return request('search', params)
+
+
+def lookup(lookup_input, region):
+    # Lookup is uses ID's instead of a string query to get the results
+    params = {
+        'id': lookup_input,
+        'country': region,
+        'entity': 'album',
+        'limit': 200,
+        'sort': 'recent'
+    }
+    lookup_info = request('lookup', params)
+    for result in lookup_info['results']:
+        if result['wrapperType'] == 'collection':
+            print(f"{result['collectionName']} [{result['collectionId']}]")
+            artwork_url = 'https://a1.mzstatic.com/r40/' + '/'.join(result['artworkUrl100'].split('/')[5:-1])
+            filename = f"{result['artistId']} - {result['collectionId']}"
+            download_artwork(artwork_url, filename)
+        elif result['wrapperType'] == 'artist':
+            print(f"Downloading Artist: {result['artistName']} [{result['artistId']}]")
+
+
+def url_parse(url):
+    # Parse the URL and return the ID, region and type
+    split_url = url.split('/')
+    if split_url[3] == 'artist' or split_url[3] == 'album':
+        return split_url[-1], 'us', split_url[3]
+    else:
+        return split_url[-1], split_url[3], split_url[4]
+
+
+def main(args):
+    if args.search:
+        if args.artist_search:
+            shit = ['musicArtist', 'artistId', 'artistName']
+        else:
+            shit = ['album', 'collectionId', 'collectionName']
+        results = search(args.input, shit[0])['results']
+        for i in range(len(results)):
+            print(f"[{i + 1}] {results[i][shit[2]]} [{results[i][shit[1]]}]")
+        choice = input("\nChoice: ")
+        if choice.isdigit():
+            choice = int(choice) - 1
+            lookup(results[choice][shit[1]], args.region_code)
+    else:
+        adam_id, region, lookup_type = url_parse(args.input)
+        lookup(adam_id, region)
+
+
+if __name__ == "__main__":
+    print(LOGO)
     if not os.path.exists("cover"):
         os.makedirs("cover")
-
-def routine(album_id, region_code):
-    cover_url, download_status, filename = parse_request(album_id, region_code)
-    cover_url = get_source(cover_url)
-    print(download_status)
-    download_picture_with_correct_extension(cover_url, filename, download_status)
-    
-
-def search_query_itunes_artist(query, region_code):
-    response = requests.get(f'https://itunes.apple.com/search?term={query}&entity=musicArtist&limit=25')
-    data = response.json()["results"]
-    for i in range(len(data)):
-        print(f"[{i+1}] {data[i]['artistName']}")
-    album_id = data[int(input("\nChoose the Artist to download: "))-1]["artistId"]
-    idlist = get_collectionids(album_id, region_code)
-    for i in idlist:
-        routine(i, region_code)
-
-def search_query_itunes_album(query, region_code):
-    response = requests.get(f'https://itunes.apple.com/search?term={query}&entity=album&limit=25')
-    data = response.json()["results"]
-    for i in range(len(data)):
-        print(f"[{i+1}] {data[i]['artistName']} - {data[i]['collectionName']}")
-    album_id = data[int(input("\nChoose the album to download: "))-1]["collectionId"]
-    print(album_id)
-    routine(album_id, region_code)
-
-def main(val):
-    if 'https://music.apple.com' in val:
-        url_parts = PurePosixPath(unquote(urlparse(val).path)).parts
-        if url_parts[2] == "artist":
-            idlist = get_collectionids(url_parts[4], url_parts[1])
-            for i in idlist:
-                routine(i, url_parts[1])
-        else:
-            routine(url_parts[4], url_parts[1])
-
-print(logo)
-make_dir()
-
-args = parser.parse_args()
-
-if args.album_search == True:
-    if args.region_code == None:
-        region_code = "us"
-    else:
-        region_code = args.region_code
-    if args.artist_search == False:
-        search_query_itunes_album(args.input, region_code)
-    elif args.artist_search == True:
-        search_query_itunes_artist(args.input, region_code)
-elif args.album_search == False:
-    main(args.input)
+    parser = argparse.ArgumentParser(
+        description="Downloads Album Covers as their Source File from the Itunes Search API"
+    )
+    parser.add_argument(
+        "-s", "--search",
+        dest='search',
+        help="Search for Albums",
+        action="store_true"
+    )
+    parser.add_argument(
+        "-a", "--artist",
+        dest='artist_search',
+        help="Search for Artist (use in combination with --search)",
+        action="store_true"
+    )
+    parser.add_argument(
+        "-r", "--region",
+        type=str, dest='region_code',
+        help="Set Region Code [Default: 'us'] (https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2)",
+        default="us",
+        metavar="REGION_CODE"
+    )
+    parser.add_argument(
+        "input",
+        type=str,
+        help="Apple Music URL or Search Query",
+        metavar="INPUT"
+    )
+    main(parser.parse_args())
+    print("Done")
