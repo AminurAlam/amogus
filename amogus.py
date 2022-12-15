@@ -37,9 +37,6 @@ def request(request_action, params):
 
 
 def search(search_input, search_type):
-    # Search takes a query and returns the results
-    # Only used for the initial search
-    # Every subsequent search is done with the lookup function using the ID's from the initial search
     params = {
         'term': search_input,
         'entity': search_type,
@@ -49,7 +46,6 @@ def search(search_input, search_type):
 
 
 def lookup(lookup_input, region):
-    # Lookup is uses ID's instead of a string query to get the results
     params = {
         'id': lookup_input,
         'country': region,
@@ -69,7 +65,6 @@ def lookup(lookup_input, region):
 
 
 def url_parse(url):
-    # Parse the URL and return the ID, region and type
     split_url = url.split('/')
     if split_url[3] == 'artist' or split_url[3] == 'album':
         return split_url[-1], 'us', split_url[3]
